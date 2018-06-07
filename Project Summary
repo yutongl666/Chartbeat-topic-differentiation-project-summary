@@ -1,0 +1,400 @@
+Python Code:
+
+import scipy
+import string
+from nltk.corpus import stopwords 
+from nltk.stem.wordnet import WordNetLemmatizer
+import pandas as pd
+import numpy as np
+from __future__ import print_function
+from time import time
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.decomposition import LatentDirichletAllocation
+
+%matplotlib inline
+
+n_features = 1000
+n_components = 25
+n_top_words = 15
+
+
+def print_top_words(model, feature_names, n_top_words):
+    for topic_idx, topic in enumerate(model.components_):
+        message = "Topic #%d: " % topic_idx
+        message += " ".join([feature_names[i]
+                             for i in topic.argsort()[:-n_top_words - 1:-1]])
+        print(message)
+    print()
+--------------------------------------------------------------------------------------------------------------------=
+#Read Data
+combined_title = pd.read_csv('/Users/liuyu/Desktop/summer/project 2/titles/combined_title.csv')
+combined_text  = pd.read_csv('/Users/liuyu/Desktop/summer/Practice/paragraph/paragraph_data/combined_text.csv')
+combined_title = combined_title.loc[combined_title['title'] != 'Page not found']
+
+print("Loading dataset...")
+t0 = time()
+websites_dataset = list(combined_text.text)
+websites_dataset = [str(x) for x in websites_dataset]
+title_dataset = list(combined_title.title)
+title_dataset = [str(x) for x in title_dataset]
+title_dataset = [x for x in title_dataset if x != 'Page not found']
+print("done in %0.3fs." % (time() - t0))
+--------------------------------------------------------------------------------------------------------------------
+#Clean Data
+stop = set(stopwords.words('english'))
+exclude = set(string.punctuation).union(set(string.digits))
+lemma = WordNetLemmatizer()
+
+def clean(doc):
+    stop_free = " ".join([i for i in doc.split() if i not in stop])
+    punc_numb_free = ''.join(ch for ch in stop_free if ch not in exclude)
+    normalized = " ".join(lemma.lemmatize(word) for word in punc_numb_free.split())
+    return normalized
+
+websites_clean = [clean(x).split() for x in websites_dataset]
+title_clean = [clean(x).split() for x in title_dataset]
+websites_clean = [" ".join(x) for x in websites_clean]
+title_clean = [" ".join(x) for x in title_clean]
+--------------------------------------------------------------------------------------------------------------------
+#LDA Model
+print("Extracting tf features for LDA...")
+tf_vectorizer = CountVectorizer(max_df=0.95, min_df=2,
+                                max_features=n_features,
+                                stop_words='english')
+t0 = time()
+tf1 = tf_vectorizer.fit_transform(websites_clean)
+tf2 = tf_vectorizer.transform(title_clean)
+print("done in %0.3fs." % (time() - t0))
+print()
+
+print("Fitting LDA models with tf features, "
+      "n_samples=%d and n_features=%d..."
+      % (len(websites_dataset), n_features))
+lda = LatentDirichletAllocation(n_components=n_components, max_iter=5,
+                                learning_method='online',
+                                learning_offset=50.,
+                                random_state=0,
+                                n_jobs=-1)
+t0 = time()
+lda.fit(tf1)
+print("done in %0.3fs." % (time() - t0))
+
+print("\nTopics in LDA model:")
+tf_feature_names = tf_vectorizer.get_feature_names()
+print_top_words(lda, tf_feature_names, n_top_words)
+
+Fitting LDA models with tf features, n_samples=51497 and n_features=1000...
+done in 182.505s.
+
+Topics in LDA model:
+Topic #0: card credit bank loan debt payment rate financial score report federal central account risk crisis
+Topic #1: google site service email facebook information internet user search web account data page post online
+Topic #2: year market china growth month chinese price quarter economy said week analyst rose read economic
+Topic #3: stock market fund investor investment bond asset percent trading capital financial index firm gold year
+Topic #4: store price buy product sale amazon brand item customer sell consumer retailer buying online selling
+Topic #5: people thing make time good im work feel lot day person question life problem idea
+Topic #6: city new year mr said york police day people told car time street night family
+Topic #7: company million business year mr billion executive deal firm revenue said chief industry ceo share
+Topic #8: movie story character book time thing film world people make star episode love series life
+Topic #9: money pay tax cost fee year financial make income saving account plan paying budget cash
+Topic #10: video music technology model tv song machine digital sound network medium product device ad company
+Topic #11: food eat restaurant ms business employee say day drink worker review owner customer meeting hour
+Topic #12: woman men child sex girl female kid sexual family male parent young baby mother man
+Topic #13: world energy year oil plant planet earth gas country million power global project natural region
+Topic #14: job work office working company career client business manager project interview professional skill position hour
+Topic #15: water time make light air car minute hour day sleep long speed foot hand flight
+Topic #16: game team season player week play yard year point win time league football nfl ball
+Topic #17: percent war american world people political history america year race century today americans president group
+Topic #18: health year care cost plan rate number people insurance benefit data medical policy average life
+Topic #19: state law case government official court report country legal attack group issue security public states
+Topic #20: human study brain unapproved body researcher scientist doctor animal drug people research science patient effect
+Topic #21: app phone file windows apps device computer feature android make screen work iphone drive apple
+Topic #22: graphic warning reply discussionua materialshow black color image white photo hair red fashion skin blue
+Topic #23: school student college university class high program language year education kid professor learn degree letter
+Topic #24: home house room space building art project coffee place design make wall glass work wine
+--------------------------------------------------------------------------------------------------------------------
+#Prettify
+topic_names = ['finance','internet', 'global economy', 'financial market', 'retail', 'relationship', 'city', 'corporate',
+             'entertainment', 'personal finance', 'technology', 'work life', 'family', 'energy', 'career',
+              'transportation', 'sport', 'america', 'health', 'government', 'life science', 'app',
+              'fashion', 'school', 'house']
+              
+title_topic_assn = lda.transform(tf2)
+titles_and_topics = pd.concat([combined_title.reset_index(), pd.DataFrame(title_topic_assn)], axis=1)
+titles_and_topics.drop(titles_and_topics.columns[[0]], axis=1, inplace=True)
+titles_and_topics.columns = ['article','paragraph','url', 'web', 'title', 'title_len'] + topic_names
+
+article_topic_assn = lda.transform(tf1)
+articles_and_topics = pd.concat([combined_text.reset_index(), pd.DataFrame(article_topic_assn )], axis=1)
+articles_and_topics.columns = ['web','article','text'] + topic_names
+--------------------------------------------------------------------------------------------------------------------
+R Code:
+
+#Text Differentiation Score
+articles_and_topics <- read.csv("/Users/liuyu/Desktop/summer/Practice/paragraph/paragraph_data/articles_and_topics.csv"
+                               , stringsAsFactors=FALSE)
+text_avg <- aggregate(articles_and_topics[, 4:28], list(articles_and_topics$web), mean)
+colnames(text_avg)[1] <- 'web'
+
+spearman_rank = data.frame(web = articles_and_topics$web, article = articles_and_topics$article
+                           , score = 0)
+
+for (i in 1:length(spearman_rank$web)) {
+  article = as.numeric(articles_and_topics[i, 4:28])
+  web = articles_and_topics$web[i]
+  website = c(as.numeric(text_avg[which(text_avg$web == web), 2:26]))
+  spearman_rank$score[i] = cor(article, website, method = 'spearman')
+}
+
+spearman_rank <- spearman_rank[which(!(is.na(spearman_rank$score))), ]
+
+all_u <- read.csv('all_u.csv') #Read in all user data
+article_index <- as.numeric(unique(all_u$article))
+
+for (i in 1:length(spearman_rank$article)) {
+  artc = spearman_rank$article[i]
+  if (artc %in% article_index) {
+    depth_len = as.numeric(all_u[which(all_u$article == artc), 2:3])
+    spearman_rank$max_depth[i] = depth_len[1]
+    spearman_rank$len[i] = depth_len[2]
+  }
+}
+
+article_spearman <- spearman_rank[-which(spearman_rank$max_depth == 0), 1:5]
+--------------------------------------------------------------------------------------------------------------------
+#Title Differentiation Score
+titles_and_topics <- read.csv('/Users/liuyu/Desktop/summer/Practice/paragraph/paragraph_data/titles_and_topics.csv',
+                              stringsAsFactors=FALSE)
+title_avg <- aggregate(titles_and_topics[, 7:31], list(titles_and_topics$web), mean)
+
+spearman_score <- data.frame(web = titles_and_topics$web, article = titles_and_topics$article, 
+                             score = 0)
+
+for (i in 1:length(spearman_score$web)) {
+  article = as.numeric(titles_and_topics[i, 7:31])
+  web = titles_and_topics$web[i]
+  website = c(as.numeric(title_avg[which(title_avg$web == web), 2:26]))
+  spearman_score$score[i] = cor(article, website, method = 'spearman',  use = "complete.obs")
+}
+
+title_spearman <- spearman_score[which(!(is.na(spearman_score$score))), ]
+--------------------------------------------------------------------------------------------------------------------
+#Text_tile spearman correlation
+spearman_text_title <- data.frame(web = titles_and_topics$web, article = titles_and_topics$article, 
+                                  score = 0)
+
+for (i in 1:length(spearman_text_title$article)) {
+  title = as.numeric(titles_and_topics[i, 7:31])
+  article = spearman_text_title$article[i]
+  text = as.numeric(articles_and_topics[which(articles_and_topics$article == article), 4:28])
+  spearman_text_title$score[i] = cor(title, text, method = 'spearman',  use = "complete.obs")
+}
+
+spearman_text_title <- spearman_text_title[which(!(is.na(spearman_text_title$score))), ]
+
+mean(spearman_text_title$score)
+[1] 0.2519721
+--------------------------------------------------------------------------------------------------------------------
+#Regression Analysis
+
+complete_spearman <- merge(article_spearman, title_spearman, by = c('article', 'web'))
+depth_len <- complete_spearman$max_depth / complete_spearman$len
+complete_spearman[, 4] <- depth_len 
+colnames(complete_spearman)[4] <- 'depth_len'
+complete_spearman <- complete_spearman[, -5]
+
+--------------------------------------------------------------------------------------------------------------------
+reg_1 <- lm(depth_len ~ web + title_score + text_score, data = complete_spearman)
+
+Call:
+lm(formula = depth_len ~ web + title_score + text_score, data = complete_spearman)
+
+Residuals:
+     Min       1Q   Median       3Q      Max 
+-0.65985 -0.10596  0.01068  0.11885  0.39956 
+
+Coefficients:
+                Estimate Std. Error t value Pr(>|t|)    
+(Intercept)     0.645673   0.003131 206.207  < 2e-16 ***
+webgizmodo      0.032084   0.003501   9.164  < 2e-16 ***
+webio9          0.004058   0.003358   1.208 0.226913    
+webjezebel      0.029163   0.003513   8.301  < 2e-16 ***
+weblifehacker   0.052573   0.003269  16.085  < 2e-16 ***
+websbnation     0.055112   0.003526  15.632  < 2e-16 ***
+webstartribune  0.042817   0.005686   7.531 5.15e-14 ***
+webvice         0.026377   0.007416   3.557 0.000376 ***
+webwsj         -0.034582   0.003495  -9.893  < 2e-16 ***
+title_score     0.006042   0.003539   1.707 0.087777 .  
+text_score     -0.030623   0.004490  -6.820 9.25e-12 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 0.1733 on 43300 degrees of freedom
+Multiple R-squared:  0.0271,	Adjusted R-squared:  0.02687 
+F-statistic: 120.6 on 10 and 43300 DF,  p-value: < 2.2e-16
+--------------------------------------------------------------------------------------------------------------------
+reg_2 <- lm(depth_len ~ web + text_score, data = complete_spearman)
+
+Call:
+lm(formula = depth_len ~ web + text_score, data = complete_spearman)
+
+Residuals:
+     Min       1Q   Median       3Q      Max 
+-0.66121 -0.10583  0.01063  0.11867  0.39972 
+
+Coefficients:
+                Estimate Std. Error t value Pr(>|t|)    
+(Intercept)     0.646202   0.003116 207.392  < 2e-16 ***
+webgizmodo      0.033217   0.003437   9.663  < 2e-16 ***
+webio9          0.005132   0.003299   1.556 0.119755    
+webjezebel      0.030106   0.003470   8.677  < 2e-16 ***
+weblifehacker   0.053683   0.003203  16.758  < 2e-16 ***
+websbnation     0.055758   0.003505  15.906  < 2e-16 ***
+webstartribune  0.042770   0.005686   7.522 5.49e-14 ***
+webvice         0.027006   0.007407   3.646 0.000267 ***
+webwsj         -0.034573   0.003496  -9.890  < 2e-16 ***
+text_score     -0.029317   0.004425  -6.625 3.50e-11 ***
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 0.1733 on 43301 degrees of freedom
+Multiple R-squared:  0.02703,	Adjusted R-squared:  0.02683 
+F-statistic: 133.7 on 9 and 43301 DF,  p-value: < 2.2e-16
+--------------------------------------------------------------------------------------------------------------------
+reg_3 <- lm(depth_len ~ web + title_score, data = complete_spearman)
+
+Call:
+lm(formula = depth_len ~ web + title_score, data = complete_spearman)
+
+Residuals:
+     Min       1Q   Median       3Q      Max 
+-0.66392 -0.10555  0.01049  0.11907  0.39519 
+
+Coefficients:
+                Estimate Std. Error t value Pr(>|t|)    
+(Intercept)     0.634035   0.002627 241.385  < 2e-16 ***
+webgizmodo      0.031788   0.003502   9.076  < 2e-16 ***
+webio9          0.003526   0.003359   1.050 0.293812    
+webjezebel      0.028086   0.003512   7.998 1.30e-15 ***
+weblifehacker   0.052103   0.003270  15.936  < 2e-16 ***
+websbnation     0.054506   0.003526  15.456  < 2e-16 ***
+webstartribune  0.044775   0.005682   7.881 3.33e-15 ***
+webvice         0.024446   0.007415   3.297 0.000978 ***
+webwsj         -0.031882   0.003475  -9.175  < 2e-16 ***
+title_score     0.001933   0.003489   0.554 0.579644    
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 0.1734 on 43301 degrees of freedom
+Multiple R-squared:  0.02605,	Adjusted R-squared:  0.02585 
+F-statistic: 128.7 on 9 and 43301 DF,  p-value: < 2.2e-16
+--------------------------------------------------------------------------------------------------------------------
+complete_spearman$text_score2 <- (complete_spearman$text_score)^2
+complete_spearman$title_score2 <- (complete_spearman$title_score)^2
+
+quad_reg_1 <- lm(depth_len ~ web + title_score + text_score + title_score2 + text_score2, data = complete_spearman)
+
+Call:
+lm(formula = depth_len ~ web + title_score + text_score + title_score2 + 
+    text_score2, data = complete_spearman1)
+
+Residuals:
+    Min      1Q  Median      3Q     Max 
+-0.6587 -0.1058  0.0106  0.1187  0.4001 
+
+Coefficients:
+                 Estimate Std. Error t value Pr(>|t|)    
+(Intercept)     0.6482323  0.0034903 185.721  < 2e-16 ***
+webgizmodo      0.0318693  0.0035183   9.058  < 2e-16 ***
+webio9          0.0040010  0.0033597   1.191 0.233716    
+webjezebel      0.0289664  0.0035247   8.218  < 2e-16 ***
+weblifehacker   0.0524573  0.0032721  16.032  < 2e-16 ***
+websbnation     0.0554554  0.0035299  15.710  < 2e-16 ***
+webstartribune  0.0432183  0.0056894   7.596 3.11e-14 ***
+webvice         0.0264446  0.0074160   3.566 0.000363 ***
+webwsj         -0.0343352  0.0034991  -9.813  < 2e-16 ***
+title_score     0.0005984  0.0060988   0.098 0.921834    
+text_score     -0.0513810  0.0128891  -3.986 6.72e-05 ***
+title_score2    0.0116363  0.0105575   1.102 0.270389    
+text_score2     0.0279805  0.0161964   1.728 0.084071 .  
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 0.1733 on 43298 degrees of freedom
+Multiple R-squared:  0.02719,	Adjusted R-squared:  0.02692 
+F-statistic: 100.9 on 12 and 43298 DF,  p-value: < 2.2e-16
+--------------------------------------------------------------------------------------------------------------------
+quad_reg_2 <- lm(depth_len ~ web + text_score + text_score2, data = complete_spearman)
+
+Call:
+lm(formula = depth_len ~ web + text_score + text_score2, data = complete_spearman)
+
+Residuals:
+     Min       1Q   Median       3Q      Max 
+-0.66035 -0.10591  0.01068  0.11880  0.39978 
+
+Coefficients:
+                Estimate Std. Error t value Pr(>|t|)    
+(Intercept)     0.648905   0.003475 186.760  < 2e-16 ***
+webgizmodo      0.033381   0.003439   9.708  < 2e-16 ***
+webio9          0.005193   0.003299   1.574 0.115478    
+webjezebel      0.030218   0.003470   8.708  < 2e-16 ***
+weblifehacker   0.053739   0.003203  16.775  < 2e-16 ***
+websbnation     0.056057   0.003509  15.973  < 2e-16 ***
+webstartribune  0.042986   0.005687   7.559 4.16e-14 ***
+webvice         0.027094   0.007407   3.658 0.000255 ***
+webwsj         -0.034496   0.003496  -9.868  < 2e-16 ***
+text_score     -0.050526   0.012853  -3.931 8.47e-05 ***
+text_score2     0.028450   0.016187   1.758 0.078830 .  
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 0.1733 on 43300 degrees of freedom
+Multiple R-squared:  0.0271,	Adjusted R-squared:  0.02688 
+F-statistic: 120.6 on 10 and 43300 DF,  p-value: < 2.2e-16
+--------------------------------------------------------------------------------------------------------------------
+quad_reg_3 <- lm(depth_len ~ web + title_score + title_score2, data = complete_spearman)
+
+Call:
+lm(formula = depth_len ~ web + title_score + title_score2, data = complete_spearman)
+
+Residuals:
+     Min       1Q   Median       3Q      Max 
+-0.66336 -0.10547  0.01025  0.11911  0.39556 
+
+Coefficients:
+                Estimate Std. Error t value Pr(>|t|)    
+(Intercept)     0.633970   0.002627 241.319  < 2e-16 ***
+webgizmodo      0.031349   0.003518   8.910  < 2e-16 ***
+webio9          0.003397   0.003360   1.011 0.312065    
+webjezebel      0.027731   0.003522   7.874 3.53e-15 ***
+weblifehacker   0.051908   0.003273  15.860  < 2e-16 ***
+websbnation     0.054572   0.003527  15.474  < 2e-16 ***
+webstartribune  0.044990   0.005684   7.915 2.52e-15 ***
+webvice         0.024435   0.007414   3.296 0.000983 ***
+webwsj         -0.031690   0.003478  -9.112  < 2e-16 ***
+title_score    -0.004548   0.006058  -0.751 0.452781    
+title_score2    0.013812   0.010555   1.309 0.190664    
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+Residual standard error: 0.1734 on 43300 degrees of freedom
+Multiple R-squared:  0.02609,	Adjusted R-squared:  0.02587 
+
+--------------------------------------------------------------------------------------------------------------------
+cor.test(complete_spearman1$text_score, complete_spearman$title_score, use = "complete.obs")
+
+	Pearson's product-moment correlation
+
+data:  complete_spearman$text_score and complete_spearman$title_score
+t = 48.087, df = 43309, p-value < 2.2e-16
+alternative hypothesis: true correlation is not equal to 0
+95 percent confidence interval:
+ 0.2161756 0.2340566
+sample estimates:
+      cor 
+0.2251351 
+
+--------------------------------------------------------------------------------------------------------------------
+
+
